@@ -2,260 +2,245 @@
 // MAIN - Entry point, input handling, game loop
 // ============================================
 
+const UI = {
+    screens: ['title-screen', 'game-over-screen', 'victory-screen'],
+
+    show(id) {
+        for (const s of this.screens) document.getElementById(s).classList.toggle('hidden', s !== id);
+        const primary = id && document.querySelector(`#${id} button:not(.hidden)`);
+        if (primary) setTimeout(() => primary.focus(), 50);
+    },
+
+    hideAll() {
+        this.show(null);
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    },
+
+    refreshTitle() {
+        const hasSave = !!Storage.get(SAVE_KEY);
+        document.getElementById('continue-btn').classList.toggle('hidden', !hasSave);
+    },
+
+    refreshMute() {
+        const btn = document.getElementById('mute-btn');
+        btn.textContent = '♪';
+        btn.classList.toggle('off', AudioCtx.muted);
+        btn.title = AudioCtx.muted ? 'Attiva audio (M)' : 'Disattiva audio (M)';
+    },
+};
+
 (function() {
     'use strict';
 
-    // Cache grass tiles to avoid random flickering
-    const grassCache = {};
-
-    function initGrassCache() {
-        for (const mapName in Maps) {
-            const map = Maps[mapName];
-            grassCache[mapName] = {};
-            for (let y = 0; y < map.height; y++) {
-                for (let x = 0; x < map.width; x++) {
-                    grassCache[mapName][`${x},${y}`] = Math.random() > 0.7;
-                }
-            }
-        }
-    }
-
-    // Override drawMapTile to use cached grass
-    const originalDrawMapTile = Game.drawMapTile.bind(Game);
-    Game.drawMapTile = function(tile, x, y) {
-        if (tile === 0) {
-            if (this.currentMapName.startsWith('otherworld') || this.currentMapName === 'otherworld_secret') {
-                Renderer.drawTile(x, y, TileSprites.voidFloor());
-            } else if (this.currentMapName === 'house_exterior' &&
-                x >= 5 && x <= 14 && y >= 3 && y <= 9) {
-                Renderer.drawTile(x, y, TileSprites.houseFloor());
-            } else {
-                const dark = grassCache[this.currentMapName]
-                    ? grassCache[this.currentMapName][`${x},${y}`]
-                    : false;
-                Renderer.drawTile(x, y, TileSprites.grass(dark));
-            }
-            return;
-        }
-        if (tile === 1) {
-            if (this.currentMapName.startsWith('otherworld')) {
-                const key = `${this.currentMapName}_${x}_${y}`;
-                if (grassCache[key] === undefined) {
-                    grassCache[key] = Math.random() > 0.3;
-                }
-                if (grassCache[key]) {
-                    Renderer.drawTile(x, y, TileSprites.brickWall());
-                } else {
-                    Renderer.drawTile(x, y, TileSprites.fleshWall());
-                }
-                return;
-            }
-        }
-        originalDrawMapTile(tile, x, y);
+    const KEY_DIRS = {
+        ArrowUp: 'up', w: 'up', W: 'up',
+        ArrowDown: 'down', s: 'down', S: 'down',
+        ArrowLeft: 'left', a: 'left', A: 'left',
+        ArrowRight: 'right', d: 'right', D: 'right',
     };
+    const ACTION_KEYS = new Set([' ', 'Enter', 'z', 'Z', 'x', 'X', 'e', 'E']);
 
-    // ===== INITIALIZATION =====
+    // Most recently pressed direction wins
+    const heldDirs = [];
+    let touchDir = null;
+
     function initGame() {
         Renderer.init();
         Dialogue.init();
-        initGrassCache();
-
         setupInput();
         setupUI();
+        Game.showTitle();
+        UI.refreshTitle();
+        UI.refreshMute();
+        Game.updateHUD();
+        requestAnimationFrame(loop);
+    }
 
-        // Start game loop
-        requestAnimationFrame(gameLoop);
+    function action() {
+        AudioCtx.init();
+        if (Dialogue.isActive()) Dialogue.advance();
+        else Game.interact();
     }
 
     // ===== INPUT =====
-    const keys = {};
-    let lastInputTime = 0;
-    const INPUT_DELAY = 120; // ms
-
     function setupInput() {
-        // Keyboard
         document.addEventListener('keydown', (e) => {
-            keys[e.key] = true;
             AudioCtx.init();
+            const playing = Game.state === 'play';
+            const dir = KEY_DIRS[e.key];
 
-            if (Dialogue.isActive()) {
-                if (e.key === ' ' || e.key === 'Enter' || e.key === 'z') {
-                    Dialogue.advance();
-                }
+            if (e.key === 'm' || e.key === 'M') {
+                AudioCtx.toggleMute();
+                UI.refreshMute();
                 return;
             }
+            if (!playing) return; // menus use normal button focus
 
-            if (e.key === 'z' || e.key === 'Enter' || e.key === ' ') {
-                Game.interact();
+            if (dir) {
+                e.preventDefault();
+                if (!heldDirs.includes(dir)) heldDirs.push(dir);
+                // Move right away so even a very short tap counts
+                if (!e.repeat) Game.tryMove(dir);
+                return;
+            }
+            if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+                e.preventDefault();
+                Game.togglePause();
+                return;
+            }
+            if (ACTION_KEYS.has(e.key)) {
+                e.preventDefault();
+                if (e.repeat) return;
+                action();
             }
         });
 
         document.addEventListener('keyup', (e) => {
-            keys[e.key] = false;
+            const dir = KEY_DIRS[e.key];
+            if (dir) {
+                const i = heldDirs.indexOf(dir);
+                if (i >= 0) heldDirs.splice(i, 1);
+            }
         });
 
-        // Mobile controls
-        const btns = document.querySelectorAll('.ctrl-btn');
-        btns.forEach(btn => {
-            const dir = btn.dataset.dir;
+        window.addEventListener('blur', () => {
+            heldDirs.length = 0;
+            touchDir = null;
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && Game.state === 'play' && !Game.paused) Game.togglePause();
+        });
 
-            const handlePress = (e) => {
+        // On-screen pad: hold a direction to keep walking
+        document.querySelectorAll('.ctrl-btn').forEach(btn => {
+            const dir = btn.dataset.dir;
+            const press = (e) => {
                 e.preventDefault();
                 AudioCtx.init();
-
+                btn.classList.add('pressed');
                 if (dir === 'action') {
-                    if (Dialogue.isActive()) {
-                        Dialogue.advance();
-                    } else {
-                        Game.interact();
-                    }
+                    action();
                 } else {
-                    if (!Dialogue.isActive()) {
-                        Game.movePlayer(dir);
-                    }
+                    touchDir = dir;
+                    Game.tryMove(dir);
                 }
             };
-
-            btn.addEventListener('touchstart', handlePress, { passive: false });
-            btn.addEventListener('mousedown', handlePress);
-
-            // Repeat movement while held
-            let holdInterval = null;
-            const startHold = (e) => {
-                e.preventDefault();
-                if (dir !== 'action') {
-                    holdInterval = setInterval(() => {
-                        if (!Dialogue.isActive()) {
-                            Game.movePlayer(dir);
-                        }
-                    }, 150);
-                }
+            const release = (e) => {
+                btn.classList.remove('pressed');
+                if (touchDir === dir) touchDir = null;
             };
-            const endHold = () => {
-                if (holdInterval) {
-                    clearInterval(holdInterval);
-                    holdInterval = null;
-                }
-            };
-
-            btn.addEventListener('touchstart', startHold, { passive: false });
-            btn.addEventListener('touchend', endHold);
-            btn.addEventListener('touchcancel', endHold);
-            btn.addEventListener('mousedown', startHold);
-            btn.addEventListener('mouseup', endHold);
-            btn.addEventListener('mouseleave', endHold);
+            btn.addEventListener('pointerdown', press);
+            btn.addEventListener('pointerup', release);
+            btn.addEventListener('pointercancel', release);
+            btn.addEventListener('pointerleave', release);
         });
 
-        // Swipe support for canvas
-        let touchStartX = 0;
-        let touchStartY = 0;
+        // Swipe to move, tap to interact
+        let startX = 0, startY = 0, startT = 0;
         const canvas = document.getElementById('game-canvas');
-
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
             AudioCtx.init();
-            touchStartX = e.touches[0].clientX;
-            touchStartY = e.touches[0].clientY;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            startT = performance.now();
         }, { passive: false });
 
         canvas.addEventListener('touchend', (e) => {
             e.preventDefault();
-            if (Dialogue.isActive()) {
-                Dialogue.advance();
+            if (Game.state !== 'play') return;
+            const dx = e.changedTouches[0].clientX - startX;
+            const dy = e.changedTouches[0].clientY - startY;
+            if (Math.abs(dx) < 12 && Math.abs(dy) < 12) {
+                if (performance.now() - startT < 400) action();
                 return;
             }
-
-            const dx = e.changedTouches[0].clientX - touchStartX;
-            const dy = e.changedTouches[0].clientY - touchStartY;
-            const absDx = Math.abs(dx);
-            const absDy = Math.abs(dy);
-
-            if (absDx < 10 && absDy < 10) {
-                // Tap - interact
-                Game.interact();
-                return;
-            }
-
-            if (absDx > absDy) {
-                Game.movePlayer(dx > 0 ? 'right' : 'left');
-            } else {
-                Game.movePlayer(dy > 0 ? 'down' : 'up');
-            }
+            if (Dialogue.isActive()) return;
+            if (Math.abs(dx) > Math.abs(dy)) Game.tryMove(dx > 0 ? 'right' : 'left');
+            else Game.tryMove(dy > 0 ? 'down' : 'up');
         }, { passive: false });
+
+        canvas.addEventListener('click', () => {
+            if (Game.state === 'play' && Game.paused) Game.togglePause();
+        });
     }
 
-    function processKeyboardInput() {
-        const now = Date.now();
-        if (now - lastInputTime < INPUT_DELAY) return;
-        if (Dialogue.isActive()) return;
-
-        if (keys['ArrowUp'] || keys['w'] || keys['W']) {
-            Game.movePlayer('up');
-            lastInputTime = now;
-        } else if (keys['ArrowDown'] || keys['s'] || keys['S']) {
-            Game.movePlayer('down');
-            lastInputTime = now;
-        } else if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
-            Game.movePlayer('left');
-            lastInputTime = now;
-        } else if (keys['ArrowRight'] || keys['d'] || keys['D']) {
-            Game.movePlayer('right');
-            lastInputTime = now;
-        }
+    function processHeldInput() {
+        const dir = heldDirs[heldDirs.length - 1] || touchDir;
+        if (dir) Game.tryMove(dir);
     }
 
     // ===== UI =====
     function setupUI() {
-        // Start button
-        document.getElementById('start-btn').addEventListener('click', () => {
+        const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => {
             AudioCtx.init();
-            document.getElementById('title-screen').classList.add('hidden');
-            Game.init();
+            e.currentTarget.blur();
+            fn();
         });
 
-        // Restart button
-        document.getElementById('restart-btn').addEventListener('click', () => {
-            document.getElementById('game-over-screen').classList.add('hidden');
-            const title = document.getElementById('game-over-title');
-            title.style.color = '';
-            title.style.textShadow = '';
-            initGrassCache();
-            Game.init();
+        on('start-btn', () => {
+            UI.hideAll();
+            Game.newGame();
         });
+        on('continue-btn', () => {
+            UI.hideAll();
+            Game.continueGame();
+        });
+        on('restart-btn', () => {
+            UI.hideAll();
+            Game.respawn();
+        });
+        on('menu-btn', () => {
+            Game.showTitle();
+            UI.refreshTitle();
+            UI.show('title-screen');
+        });
+        on('again-btn', () => {
+            Game.showTitle();
+            UI.refreshTitle();
+            UI.show('title-screen');
+        });
+        on('mute-btn', () => {
+            AudioCtx.toggleMute();
+            UI.refreshMute();
+        });
+        on('pause-btn', () => Game.togglePause());
 
-        // Prevent context menu on long press
+        // Title music needs a first gesture before the browser lets audio play
+        const unlock = () => {
+            AudioCtx.init();
+            document.removeEventListener('pointerdown', unlock);
+        };
+        document.addEventListener('pointerdown', unlock);
+
         document.addEventListener('contextmenu', (e) => e.preventDefault());
+        // Recompute canvas size once fonts and layout settle
+        setTimeout(() => Renderer.resize(), 100);
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => Renderer.resize());
     }
 
-    // ===== GAME LOOP =====
-    let lastTime = 0;
-    const FPS = 60;
-    const frameTime = 1000 / FPS;
+    // ===== GAME LOOP (fixed 60 Hz simulation, render every frame) =====
+    let last = performance.now();
+    let acc = 0;
 
-    function gameLoop(timestamp) {
-        requestAnimationFrame(gameLoop);
+    function loop(now) {
+        requestAnimationFrame(loop);
+        acc += Math.min(250, now - last);
+        last = now;
 
-        if (timestamp - lastTime < frameTime) return;
-        lastTime = timestamp;
-
-        if (!Game.gameStarted) {
-            // Draw title background
-            Renderer.clear();
-            return;
+        let steps = 0;
+        while (acc >= STEP_MS && steps < 5) {
+            processHeldInput();
+            Game.update();
+            acc -= STEP_MS;
+            steps++;
         }
+        if (steps === 5) acc = 0;
 
-        // Input
-        processKeyboardInput();
-
-        // Update
-        Game.update();
-        Dialogue.update(timestamp);
-
-        // Render
+        Dialogue.update(now);
         Game.render();
     }
 
-    // ===== START =====
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initGame);
     } else {

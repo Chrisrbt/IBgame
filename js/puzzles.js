@@ -3,76 +3,76 @@
 // ============================================
 
 const Puzzles = {
-    // Track puzzle states
     leverState: {},
     floorBtnSequence: [],
     floorBtnExpected: [1, 2, 3, 4], // red, green, blue, yellow
+    leverSolution: { lever1: true, lever2: false, lever3: true, lever4: false },
 
     reset() {
         this.leverState = {};
         this.floorBtnSequence = [];
     },
 
-    // Toggle a lever and check puzzle
     toggleLever(entity, game) {
+        if (game.solvedPuzzles.includes('west_levers')) {
+            game.showDialogue("Le leve sono bloccate. Il meccanismo ha gia' fatto il suo lavoro.");
+            return;
+        }
         entity.on = !entity.on;
         this.leverState[entity.id] = entity.on;
-        AudioCtx.play(entity.on ? 400 : 200, 0.15, 'square', 0.08);
+        Sfx.lever(entity.on);
+        Particles.burst(entity.x * TILE + 16, entity.y * TILE + 10, '200,200,200', 5, 1.2, { life: 15, size: 1 });
 
-        // Check: lever1 and lever3 should be ON, lever2 and lever4 OFF
-        const l1 = this.leverState['lever1'] || false;
-        const l2 = this.leverState['lever2'] || false;
-        const l3 = this.leverState['lever3'] || false;
-        const l4 = this.leverState['lever4'] || false;
+        const solved = Object.keys(this.leverSolution)
+            .every(id => (this.leverState[id] || false) === this.leverSolution[id]);
 
-        if (l1 && !l2 && l3 && !l4) {
-            // Puzzle solved!
-            AudioCtx.puzzle();
-            game.showDialogue("Le leve scattano... senti un rumore. Qualcosa e' apparso al centro della stanza!");
-            // Reveal the blue crystal
-            const crystal = game.currentEntities.find(e => e.id === 'crystal_blue');
-            if (crystal) crystal.hidden = false;
+        if (solved) {
             game.puzzleSolved('west_levers');
+            Sfx.puzzle();
+            Renderer.shake(12, 2);
+            const crystal = game.currentEntities.find(e => e.id === 'crystal_blue');
+            if (crystal) {
+                crystal.hidden = false;
+                Particles.burst(crystal.x * TILE + 16, crystal.y * TILE + 16, CRYSTAL_RGB.blue, 24, 2.5);
+            }
+            game.showDialogue("Le leve scattano all'unisono... un rumore sordo. Qualcosa e' apparso al centro della stanza!");
         }
     },
 
-    // Step on floor button
     stepFloorBtn(entity, game) {
-        if (entity.pressed) return;
+        if (entity.pressed || game.solvedPuzzles.includes('east_pattern')) return;
 
         entity.pressed = true;
         this.floorBtnSequence.push(entity.order);
-        AudioCtx.play(300 + entity.order * 100, 0.1, 'sine', 0.08);
+        Sfx.tile(entity.order);
+        Particles.burst(entity.x * TILE + 16, entity.y * TILE + 16, hexToRgb(entity.color), 10, 1.5);
 
-        // Check if sequence is correct so far
-        for (let i = 0; i < this.floorBtnSequence.length; i++) {
-            if (this.floorBtnSequence[i] !== this.floorBtnExpected[i]) {
-                // Wrong sequence!
-                AudioCtx.error();
-                game.showDialogue("Le piastrelle si spengono... devi ricominciare la sequenza.");
-                this.floorBtnSequence = [];
-                // Reset all floor buttons
-                game.currentEntities.forEach(e => {
-                    if (e.type === 'floor_btn') e.pressed = false;
-                });
-                return;
-            }
+        const wrong = this.floorBtnSequence.some((v, i) => v !== this.floorBtnExpected[i]);
+        if (wrong) {
+            Sfx.error();
+            Renderer.shake(8, 2);
+            this.floorBtnSequence = [];
+            game.currentEntities.forEach(e => {
+                if (e.type === 'floor_btn') e.pressed = false;
+            });
+            game.showDialogue("Le piastrelle si spengono con un sibilo... devi ricominciare la sequenza.");
+            return;
         }
 
-        // Check if complete
         if (this.floorBtnSequence.length === this.floorBtnExpected.length) {
-            AudioCtx.puzzle();
-            game.showDialogue("Le piastrelle brillano! Un cristallo rosso appare dal pavimento!");
-            const crystal = game.currentEntities.find(e => e.id === 'crystal_red');
-            if (crystal) crystal.hidden = false;
             game.puzzleSolved('east_pattern');
+            Sfx.puzzle();
+            Renderer.shake(12, 2);
+            const crystal = game.currentEntities.find(e => e.id === 'crystal_red');
+            if (crystal) {
+                crystal.hidden = false;
+                Particles.burst(crystal.x * TILE + 16, crystal.y * TILE + 16, CRYSTAL_RGB.red, 24, 2.5);
+            }
+            game.showDialogue("Le piastrelle brillano tutte insieme! Un cristallo rosso emerge dal pavimento!");
         }
     },
 
-    // Check if player can enter final door
     canEnterFinal(game) {
-        return game.inventory.includes('crystal_blue')
-            && game.inventory.includes('crystal_red')
-            && game.inventory.includes('crystal_green');
+        return ['crystal_blue', 'crystal_red', 'crystal_green'].every(id => game.inventory.includes(id));
     },
 };
