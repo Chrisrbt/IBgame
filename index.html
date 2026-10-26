@@ -2,62 +2,104 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#000000">
+    <meta name="description" content="Nel Bosco - un'avventura horror in pixel art ispirata a Ib.">
     <title>Nel Bosco - Un gioco horror</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=VT323&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🌲</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🥀</text></svg>">
 </head>
 <body>
     <div id="game-container">
-        <canvas id="game-canvas"></canvas>
-        <div id="dialogue-box" class="hidden">
-            <div id="dialogue-text"></div>
-            <div id="dialogue-continue">Tocca per continuare...</div>
-        </div>
-        <div id="title-screen">
-            <div id="title-content">
-                <h1>Nel Bosco</h1>
-                <p class="subtitle">Un viaggio nell'oscurita</p>
-                <div class="title-art">
-                    <pre>
-    🌲🌲🌲🌲🌲🌲🌲
-   🌲  🌑🌑🌑  🌲
-  🌲  🌑  🏚️  🌑  🌲
-   🌲  🌑🌑🌑  🌲
-    🌲🌲🌲🌲🌲🌲🌲
-                    </pre>
-                </div>
-                <button id="start-btn">INIZIA</button>
-                <p class="controls-hint">Usa le frecce o tocca lo schermo per muoverti</p>
+        <div id="hud">
+            <div id="rose" title="Petali della rosa: sono la tua vita">
+                <span class="rose-icon">🌹</span>
+                <div id="petals"></div>
+            </div>
+            <div id="inventory">
+                <div id="inventory-items"></div>
+            </div>
+            <div id="hud-buttons">
+                <button class="hud-btn" id="pause-btn" title="Pausa (P)">II</button>
+                <button class="hud-btn" id="mute-btn" title="Audio (M)">♪</button>
             </div>
         </div>
-        <div id="inventory-bar">
-            <div id="inventory-label">Inventario:</div>
-            <div id="inventory-items"></div>
+
+        <div id="stage">
+            <canvas id="game-canvas"></canvas>
+            <div id="dialogue-box" class="hidden">
+                <div id="dialogue-name" class="hidden"></div>
+                <div id="dialogue-text"></div>
+                <div id="dialogue-continue">▼</div>
+            </div>
         </div>
+
         <div id="mobile-controls">
-            <button class="ctrl-btn" id="btn-up" data-dir="up">&#9650;</button>
-            <div class="ctrl-row">
-                <button class="ctrl-btn" id="btn-left" data-dir="left">&#9664;</button>
-                <button class="ctrl-btn" id="btn-action" data-dir="action">&#9679;</button>
-                <button class="ctrl-btn" id="btn-right" data-dir="right">&#9654;</button>
+            <div class="dpad">
+                <button class="ctrl-btn" id="btn-up" data-dir="up" aria-label="Su">&#9650;</button>
+                <button class="ctrl-btn" id="btn-left" data-dir="left" aria-label="Sinistra">&#9664;</button>
+                <button class="ctrl-btn" id="btn-right" data-dir="right" aria-label="Destra">&#9654;</button>
+                <button class="ctrl-btn" id="btn-down" data-dir="down" aria-label="Giu'">&#9660;</button>
             </div>
-            <button class="ctrl-btn" id="btn-down" data-dir="down">&#9660;</button>
+            <button class="ctrl-btn" id="btn-action" data-dir="action" aria-label="Azione">AZIONE</button>
         </div>
-        <div id="game-over-screen" class="hidden">
+
+        <div id="title-screen" class="overlay">
+            <div class="fog"></div>
+            <div id="title-content">
+                <div class="title-rose">🥀</div>
+                <h1>Nel Bosco</h1>
+                <p class="subtitle">Un viaggio nell'oscurita'</p>
+                <div class="menu">
+                    <button id="continue-btn" class="menu-btn hidden">CONTINUA</button>
+                    <button id="start-btn" class="menu-btn">NUOVA PARTITA</button>
+                </div>
+                <div class="controls-hint">
+                    <p><b>Frecce / WASD</b> muoviti &nbsp;·&nbsp; <b>Spazio / Z</b> azione</p>
+                    <p><b>P</b> pausa &nbsp;·&nbsp; <b>M</b> musica &nbsp;·&nbsp; su telefono: pulsanti o swipe</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="game-over-screen" class="overlay hidden">
             <h1 id="game-over-title">GAME OVER</h1>
             <p id="game-over-text"></p>
-            <button id="restart-btn">Riprova</button>
+            <div class="menu">
+                <button id="restart-btn" class="menu-btn">RIPROVA</button>
+                <button id="menu-btn" class="menu-btn secondary">MENU</button>
+            </div>
+        </div>
+
+        <div id="victory-screen" class="overlay hidden">
+            <h1 id="victory-title">HAI VINTO!</h1>
+            <div id="victory-text">
+                <p>La Dama e' tornata nel suo quadro, e questa volta per sempre.</p>
+                <p>Tu e la nonna Maria attraversate il portale mano nella mano, e vi risvegliate nella vecchia casa, alle prime luci dell'alba.</p>
+                <p class="quote">"Grazie, tesoro. Senza di te non sarei mai uscita da li'."</p>
+                <p>Il bosco, finalmente, e' tranquillo.</p>
+                <p class="fine">~ FINE ~</p>
+            </div>
+            <p id="victory-stats"></p>
+            <div class="menu">
+                <button id="again-btn" class="menu-btn">GIOCA ANCORA</button>
+            </div>
         </div>
     </div>
     <script src="js/utils.js"></script>
+    <script src="js/audio.js"></script>
     <script src="js/renderer.js"></script>
+    <script src="js/sprites.js"></script>
     <script src="js/maps.js"></script>
+    <script src="js/particles.js"></script>
     <script src="js/entities.js"></script>
     <script src="js/puzzles.js"></script>
+    <script src="js/boss.js"></script>
     <script src="js/dialogue.js"></script>
     <script src="js/game.js"></script>
     <script src="js/main.js"></script>
